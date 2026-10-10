@@ -1,3 +1,6 @@
+# These are the CC messages used to control parameters of the VCO core.
+# It also responds to Note On/Off, Channel Aftertouch and PitchBend.
+
 // ------------------------------------------------------------------ //
 
 //  Performance / expression                                           //
