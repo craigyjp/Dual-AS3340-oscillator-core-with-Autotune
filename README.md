@@ -65,42 +65,73 @@
 // ------------------------------------------------------------------ //
 
 #define CC_PW1                23   // VCO1 static pulse width
+
 #define CC_PWM1_DEPTH         24   // VCO1 LFO2 PWM depth  (LFO2 depth, AS3340 #1)
+
 #define CC_PW2                25   // VCO2 static pulse width
+
 #define CC_PWM2_DEPTH         26   // VCO2 LFO2 PWM depth  (LFO2 depth, AS3340 #2)
 
-// ------------------------------------------------------------------ //
-//  LFO1  (TAPLFO3-D style: FM + Filter + Amp)                         //
-// ------------------------------------------------------------------ //
-#define CC_LFO1_RATE          102  // LFO1 rate, 0.05 - 12.8 Hz (exponential)
-#define CC_LFO1_DEPTH         103  // LFO1 depth / level (FM amount)
-#define CC_LFO1_WAVEFORM      104  // LFO1 waveform, 0 - 15 (see LfoWave in LFO.h)
-#define CC_LFO1_MULT          106  // LFO1 tempo multiplier: 0.5/1/1.5/2/3/4
-#define CC_LFO1_FILTER_DEPTH  110  // LFO1 -> Filter CV depth (channel_f, bipolar)
-#define CC_LFO1_AMP_DEPTH     111  // LFO1 -> Amp CV depth    (channel_h, bipolar)
 
 // ------------------------------------------------------------------ //
-//  LFO1 delay machine  (same CC numbers as the SuperSaw oscillator)   //
+
+//  LFO1  (TAPLFO3-D style: FM + Filter + Amp)                         //
+
 // ------------------------------------------------------------------ //
+
+#define CC_LFO1_RATE          102  // LFO1 rate, 0.05 - 12.8 Hz (exponential)
+
+#define CC_LFO1_DEPTH         103  // LFO1 depth / level (FM amount)
+
+#define CC_LFO1_WAVEFORM      104  // LFO1 waveform, 0 - 15 (see LfoWave in LFO.h)
+
+#define CC_LFO1_MULT          106  // LFO1 tempo multiplier: 0.5/1/1.5/2/3/4
+
+#define CC_LFO1_FILTER_DEPTH  110  // LFO1 -> Filter CV depth (channel_f, bipolar)
+
+#define CC_LFO1_AMP_DEPTH     111  // LFO1 -> Amp CV depth    (channel_h, bipolar)
+
+
+// ------------------------------------------------------------------ //
+
+//  LFO1 delay machine  (same CC numbers as the SuperSaw oscillator)   //
+
+// ------------------------------------------------------------------ //
+
 #define CC_LFO1_DELAY_TIME    55   // Delay before LFO1 onset (0 = none, else 0.1 - 5 s)
+
 #define CC_LFO1_DELAY_RAMP    56   // Ramp / fade-in after delay (0 = instant, else 0.05 - 3 s)
+
 #define CC_LFO1_RETRIG        57   // Delay retrigger: >=64 on, <64 legato
+
 #define CC_NOTES_HELD         58   // Notes-held flag from master: >=64 held, <64 all released
 
 // ------------------------------------------------------------------ //
+
 //  LFO2  (triangle -> PWM)                                            //
+
 //    depth is per-chip via CC_PWM1_DEPTH / CC_PWM2_DEPTH above         //
+
 // ------------------------------------------------------------------ //
+
 #define CC_LFO2_RATE          108  // LFO2 rate, 0.05 - 20 Hz (exponential)
 
 // ------------------------------------------------------------------ //
+
 //  Aftertouch routing  (depth = CC19)                                 //
+
 // ------------------------------------------------------------------ //
+
 #define CC_AT_DESTINATION     109  // Raw 0-4: 0 Off, 1 DCO Mod, 2 Cutoff (handled by assigner), 3 VCF Mod, 4 VCA Mod
 
 // ------------------------------------------------------------------ //
+
 //  System / actions  (act on value == 127)                            //
+
 // ------------------------------------------------------------------ //
+
 #define CC_AUTOTUNE_START     121  // Start the autotune routine
+
 #define CC_AUTOTUNE_RESET     122  // Zero all autotune corrections
+
 #define CC_ALL_NOTES_OFF      123  // Panic / all notes off
