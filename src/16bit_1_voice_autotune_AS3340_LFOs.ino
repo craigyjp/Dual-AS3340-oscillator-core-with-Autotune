@@ -64,7 +64,7 @@ bool initial_loop = 1;
 
 MIDI_CREATE_INSTANCE(HardwareSerial, Serial1, MIDI);
 
-#define MIDI_CHANNEL 1
+#define MIDI_CHANNEL 6
 
 Adafruit_NeoPixel pixels(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -801,8 +801,6 @@ void commandNote(int noteMsg) {
   lfo1NoteOn();  // arm the LFO1 delay on the first note of a phrase
   digitalWrite(GATE_NOTE1, HIGH);
   digitalWrite(GATE_LED, HIGH);
-  digitalWrite(TRIG_NOTE1, HIGH);
-  noteTrig[0] = millis();
 }
 
 // MIDI note on callback
@@ -854,16 +852,13 @@ void myNoteOff(byte channel, byte note, byte velocity) {
       digitalWrite(GATE_NOTE1, LOW);
       digitalWrite(GATE_LED, LOW);
       voices[0].note = -1;
+      lfo1DelayState = LFO1_DLY_IDLE;  // re-arm LFO1 delay for the next note (no CC58 needed)
     }
   }
 }
 
-// Kills the trigger after 20 mS
+// Updates the sync output when it changes
 void updateTimers() {
-
-  if (millis() > noteTrig[0] + trigTimeout) {
-    digitalWrite(TRIG_NOTE1, LOW);  // Set trigger low after 20 msec
-  }
 
   if (sync != oldsync) {
     if (sync) {

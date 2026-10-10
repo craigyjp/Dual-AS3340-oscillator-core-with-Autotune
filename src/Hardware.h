@@ -8,7 +8,6 @@
 
 // Voices available
 #define NO_OF_VOICES 1
-#define trigTimeout 20
 
 #define FM_INPUT 26  // ADC0  - now unused (internal LFO1 replaces external FM LFO)
 #define PWM_INPUT 27  // ADC1  - now unused (internal LFO2 replaces external PWM LFO)
@@ -30,9 +29,6 @@
 
 //Autotune input pin
 #define AUTO_INPUT 7
-
-//Trig output
-#define TRIG_NOTE1 15
 
 //Tune LED for front panel
 #define TUNE_LED 11
@@ -57,9 +53,6 @@ void setupHardware() {
 
   pinMode(GATE_NOTE1, OUTPUT);
   digitalWrite(GATE_NOTE1, LOW);
-
-  pinMode(TRIG_NOTE1, OUTPUT);
-  digitalWrite(TRIG_NOTE1, LOW);
 
   pinMode(GATE_LED, OUTPUT);
   digitalWrite(GATE_LED, LOW);
