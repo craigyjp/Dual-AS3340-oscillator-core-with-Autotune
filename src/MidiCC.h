@@ -89,6 +89,7 @@
 // ------------------------------------------------------------------ //
 //  Aftertouch routing  (depth = CC19)                                 //
 // ------------------------------------------------------------------ //
+#define CC_POLYMOD_SW         112  // Poly mod on VCO1: >=64 on, <64 off (VCO1 ignores pin 28 when off)
 #define CC_AT_DESTINATION     109  // Raw 0-4: 0 Off, 1 DCO Mod, 2 Cutoff (handled by assigner), 3 VCF Mod, 4 VCA Mod
 
 // ------------------------------------------------------------------ //

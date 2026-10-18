@@ -179,8 +179,23 @@ int bufferIndex = 0;
 int16_t autotune_value[128][2];
 int midiNote;
 volatile long count = 0; // Declare the global variable as volatile
+
+// Autotune tuning parameters
+#define AT_MAX_ITERATIONS   8         // measure/correct passes per A note (usually converges in 2-3)
+#define AT_TOLERANCE_CENTS  0.3f      // stop when within this many cents
+#define AT_SETTLE_MS        20        // VCO/DAC settle time after each DAC change
+#define AT_MAX_ERROR        ((int)(12.0f * NOTE_SF))  // correction limit: +/-1 octave (was +/-255 = ~0.5 semitone)
+#define AT_MIN_PERIODS      16        // measure at least this many cycles...
+#define AT_MIN_GATE_US      100000UL  // ...and at least 100 ms
+#define AT_MAX_GATE_US      1500000UL // ...but never longer than 1.5 s
+
+// Period-timing measurement (written by the AUTO_INPUT interrupt)
+volatile uint32_t atEdgeCount     = 0;
+volatile uint32_t atFirstEdgeUs   = 0;
+volatile uint32_t atLastEdgeUs    = 0;
+volatile uint32_t atMinIntervalUs = 0;  // edges closer than this are noise/double-triggers
 float frequency;        //storing frequency
-boolean autotuneStart = false;
+volatile boolean autotuneStart = false;  // volatile: read by core 1
 double measuredFrequency;
 double measuredFreq;
 int workingNote = 0;
@@ -213,6 +228,11 @@ float keytrackAmount = 1.0f;   // CC105: 0.0 - 1.0 (0 - 100 %)
 #define KEYTRACK_SF (NOTE_SF * 2.0f) // channel_c has no x2 output gain like the pitch CVs, so double it here
 float FM_ACTUAL = 0.0f;
 float FM_ACTUAL_VALUE = 0.0f;
+float POLYMOD_VALUE = 0.0f;   // poly mod -> VCO1 pitch (DAC counts) - computed on core 1
+volatile int32_t vco1BaseCounts = 0;  // VCO1 pitch from core 0 (everything except poly mod)
+volatile bool    core0Ready     = false;  // core 1 waits for setup() to finish
+int   polymodCentre = 2048;   // pin 28 rest voltage - measured at power-up and before each autotune
+volatile bool polymodOn = true;  // CC112: off = VCO1 ignores pin 28 completely
 float FM_ACTUAL_STR = 0.0f;
 
 int FM_RANGE_UPPER = 0;

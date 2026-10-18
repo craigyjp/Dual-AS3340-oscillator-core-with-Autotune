@@ -27,6 +27,7 @@
 #include <iostream>
 #include <cfloat>  // Include for DBL_MAX
 #include <SPI.h>
+#include "pico/mutex.h"  // DAC/SPI shared between core 0 and core 1
 #include <MIDI.h>
 #include "Parameters.h"
 #include "Hardware.h"
@@ -35,6 +36,8 @@
 #include <Adafruit_NeoPixel.h>
 #include <FS.h>
 #include <LittleFS.h>
+
+auto_init_mutex(dacMutex);  // one SPI/DAC user at a time across both cores
 
 struct VoiceAndNote {
   int note;
@@ -94,6 +97,8 @@ void setup() {
 
   setupHardware();
 
+  calibratePolymodCentre();
+
   //MIDI 5 Pin DIN
   MIDI.begin(0);
   MIDI.setHandleNoteOn(myNoteOn);
@@ -114,6 +119,45 @@ void setup() {
   pixels.show();
 
   loadTuningCorrectionsFromSD();
+
+  core0Ready = true;  // let core 1 start the VCO1 / poly mod loop
+}
+
+// ------------------------------------------------------------------ //
+//  Core 1: VCO1 pitch + audio-rate poly mod                           //
+//  Reads pin 28 and writes DAC channel A as fast as possible.         //
+//  Core 0 computes everything else into vco1BaseCounts.               //
+// ------------------------------------------------------------------ //
+// Measure pin 28's rest voltage (~1.65 V). Averages out noise and any audio.
+// Called at power-up and at the start of every autotune (patch loaded, poly mod at rest).
+void calibratePolymodCentre() {
+  long sum = 0;
+  for (int n = 0; n < 256; n++) sum += analogRead(POLYMOD_INPUT);
+  polymodCentre = sum / 256;
+  Serial.printf("Poly mod centre: %d\n", polymodCentre);
+}
+
+void setup1() {
+  while (!core0Ready) delay(1);
+}
+
+void loop1() {
+  if (autotuneStart) return;  // autotune owns channel A and the ADC
+
+  int pm = 0;
+  if (polymodOn) {
+    pm = analogRead(POLYMOD_INPUT) - polymodCentre;
+    if (abs(pm) <= POLYMOD_DEADBAND) pm = 0;
+  }
+
+  int32_t v = vco1BaseCounts + (int32_t)(pm * POLYMOD_SCALE);
+  v = constrain(v, 0, 65535);
+
+  mutex_enter_blocking(&dacMutex);
+  if (!autotuneStart) {  // autotune drives channel A itself
+    dacWrite(DAC_NOTE1, (channel_a & 0xFFF0000F) | ((v & 0xFFFF) << 4));
+  }
+  mutex_exit(&dacMutex);
 }
 
 void saveTuningCorrectionsToSD() {
@@ -188,6 +232,7 @@ void startAutotune() {
   tuneNote = 0;
   setVCOStolowestA();
   delay(200);
+  calibratePolymodCentre();  // re-measure pin 28 rest point with the patch loaded (core 1 is paused)
   workingNote = A_NOTES[tuneNote];
   targetFrequency = midi_to_freqs[workingNote][1];
   digitalWrite(VCO_SEL, LOW);
@@ -197,54 +242,37 @@ void startAutotune() {
 
 void autotune() {
   int midiNote = A_NOTES[tuneNote];
-  double targetFrequency = midi_to_freqs[midiNote][1];
-  // Serial.print("MIDI Note: ");
-  // Serial.println(midiNote);
-  // Serial.print("Target Frequency: ");
-  // Serial.println(targetFrequency);
+  float targetFrequency = midi_to_freqs[midiNote][1];
 
-  setOscillator(midiNote, oscillator);
-  delay(10);  // Allow stabilization after setting the oscillator
+  // Warm start from the previous A's correction - VCO errors change smoothly across
+  // the range, so this usually lands within a few cents on the first measurement.
+  int error = (tuneNote > 0) ? autotune_value[A_NOTES[tuneNote - 1]][oscillator] : 0;
+  int bestError = error;
+  float bestCents = 1e9f;
+  int iter;
 
-  float initialFreq = directCount(targetFrequency);
-  //double initialFreq = directCountAverage(3);  // Average initial measurement
-  // Serial.print("Initial Frequency: ");
-  // Serial.println(initialFreq);
+  // Measure -> compute the exact correction in cents -> apply -> re-measure.
+  // Converges in 2-3 passes and can correct up to +/-1 octave (AT_MAX_ERROR).
+  for (iter = 0; iter < AT_MAX_ITERATIONS; iter++) {
+    updateOscillator(midiNote, error, oscillator);
+    delay(AT_SETTLE_MS);
 
-  int minError = -255;
-  int maxError = 255;
-  int bestError = 0;
-  double bestFreqDiff = DBL_MAX;
+    float measured = directCount(targetFrequency);
+    if (measured <= 0.0f) break;  // no signal - keep the best so far
 
-  while (minError <= maxError) {
-    int midError = (minError + maxError) / 2;
-    updateOscillator(midiNote, midError, oscillator);
-    delay(10);  // Allow oscillator to stabilize
-
-    // Take multiple frequency measurements and average them
-    double measuredFreq = directCount(targetFrequency);
-    double freqDiff = abs(measuredFreq - targetFrequency);
-
-    // Serial.print("Measured Frequency: ");
-    // Serial.print(measuredFreq);
-    // Serial.print(" | Frequency Difference: ");
-    // Serial.println(freqDiff);
-
-    if (freqDiff < bestFreqDiff) {
-      bestFreqDiff = freqDiff;
-      bestError = midError;
+    float cents = 1200.0f * log2f(targetFrequency / measured);  // + = VCO is flat
+    if (fabsf(cents) < fabsf(bestCents)) {
+      bestCents = cents;
+      bestError = error;
     }
+    if (fabsf(cents) <= AT_TOLERANCE_CENTS) break;
 
-    // Adjust the binary search range
-    if (measuredFreq < targetFrequency) {
-      minError = midError + 1;  // Increase offset
-    } else if (measuredFreq > targetFrequency) {
-      maxError = midError - 1;  // Decrease offset
-    } else {
-      bestError = midError;  // Exact match found
-      break;
-    }
+    error += (int)lroundf(cents / 100.0f * NOTE_SF);  // NOTE_SF = DAC counts per semitone
+    error = constrain(error, -AT_MAX_ERROR, AT_MAX_ERROR);
   }
+
+  Serial.printf("Osc %d  note %3d  target %8.2f Hz  offset %6d  residual %+6.2f cents  (%d passes)\n",
+                oscillator, midiNote, targetFrequency, bestError, bestCents, iter + 1);
 
   // Save the best error value
   autotune_value[midiNote][oscillator] = bestError;
@@ -370,38 +398,37 @@ void loadSDCardNow() {
   loadTuningCorrectionsFromSD();
 }
 
+// Timestamps rising edges for period measurement. Edges closer together than
+// atMinIntervalUs are ignored (comparator chatter / double triggers).
 void my_isr() {
-  count++;  // Increment count on each rising edge
+  uint32_t t = micros();
+  if (atEdgeCount != 0 && (t - atLastEdgeUs) < atMinIntervalUs) return;
+  if (atEdgeCount == 0) atFirstEdgeUs = t;
+  atLastEdgeUs = t;
+  atEdgeCount++;
 }
 
+// Measures frequency by timing whole periods (first edge -> last edge) rather than
+// counting edges in a fixed window. Resolution is ~1 us over the gate, i.e. a few
+// ppm (hundredths of a cent) even at A0, where the old counter was +/-30 cents.
 float directCount(float targetFreq) {
-  count = 0;  // Reset count
+  uint32_t gateUs = (uint32_t)(AT_MIN_PERIODS * 1e6f / targetFreq);
+  if (gateUs < AT_MIN_GATE_US) gateUs = AT_MIN_GATE_US;
+  if (gateUs > AT_MAX_GATE_US) gateUs = AT_MAX_GATE_US;
 
-  // Dynamically calculate measurement time in microseconds
-  uint32_t measurementDuration;
-  if (targetFreq <= 50.0) {
-    measurementDuration = 2E6;  // 2 seconds for low frequencies (<= 50 Hz)
-  } else if (targetFreq <= 100.0) {
-    measurementDuration = 1E6;  // 1 second for moderate frequencies
-  } else {
-    measurementDuration = 5E5;  // 500 ms for higher frequencies
-  }
+  // Reject edges faster than ~3x the target - copes with VCOs well sharp, kills chatter
+  atMinIntervalUs = (uint32_t)(0.3f * 1e6f / targetFreq);
+  atEdgeCount = 0;
 
-  uint32_t startTime = micros();
-  uint32_t targetTime = startTime + measurementDuration;
-
-  // Enable interrupt for rising edge detection
   attachInterrupt(digitalPinToInterrupt(AUTO_INPUT), my_isr, RISING);
-
-  // Wait for the measurement duration
-  while (micros() - startTime < measurementDuration) {}
-
-  // Disable interrupt to stop counting
+  uint32_t start = micros();
+  while (micros() - start < gateUs) {}
   detachInterrupt(digitalPinToInterrupt(AUTO_INPUT));
 
-  // Calculate frequency based on the measurement time
-  float frequency = static_cast<float>(count) * (1E6 / measurementDuration);
-  return frequency;
+  uint32_t n = atEdgeCount;
+  uint32_t span = atLastEdgeUs - atFirstEdgeUs;
+  if (n < 3 || span == 0) return 0.0f;  // no usable signal
+  return (float)(n - 1) * 1e6f / (float)span;
 }
 
 void loop() {
@@ -578,6 +605,10 @@ void myControlChange(byte channel, byte number, byte value) {
       case CC_FM_AT_WHEEL:  // Aftertouch depth (applies to CC109 destination)
         atDepth = value / 127.0f;
         applyAftertouch();
+        break;
+
+      case CC_POLYMOD_SW:  // Poly mod on/off for VCO1
+        polymodOn = (value >= 64);
         break;
 
       case CC_AT_DESTINATION:  // 0 Off, 1 DCO, 2 Cutoff (assigner), 3 VCF, 4 VCA
@@ -904,10 +935,9 @@ void updateVoice1() {
 
   // Calculate mV for channel_a (Oscillator A)
   oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
-  additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE + FM_LFO_VALUE));
-  finalmV = (currentMV_a + additionalmV);
-  sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
+  // Core 1 adds poly mod and writes channel A - here we only publish the base pitch.
+  // (int) maths so negative offsets don't clamp to 0 when cast to unsigned on ARM.
+  vco1BaseCounts = (int32_t)currentMV_a + (int32_t)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE + FM_LFO_VALUE));
 
   // Calculate mV for channel_b (Oscillator B)
   oscbnote1 = note1 + INTERVAL + OCTAVE_B;  // Apply interval and octave B adjustments
@@ -975,6 +1005,13 @@ void allNotesOff() {
 
 
 void outputDAC(int CHIP_SELECT, uint32_t sample_data) {
+  mutex_enter_blocking(&dacMutex);
+  dacWrite(CHIP_SELECT, sample_data);
+  mutex_exit(&dacMutex);
+}
+
+// Raw DAC write - caller must hold dacMutex
+void dacWrite(int CHIP_SELECT, uint32_t sample_data) {
   SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE1));
   digitalWrite(CHIP_SELECT, LOW);
   delayMicroseconds(1);

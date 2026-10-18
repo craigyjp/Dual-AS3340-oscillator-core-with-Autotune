@@ -11,7 +11,12 @@
 
 #define FM_INPUT 26  // ADC0  - now unused (internal LFO1 replaces external FM LFO)
 #define PWM_INPUT 27  // ADC1  - now unused (internal LFO2 replaces external PWM LFO)
-#define POLYMOD_INPUT 28  //ADC2
+#define POLYMOD_INPUT 28  //ADC2 - poly mod (DCO2 + filter env), rests at 1.65 V -> VCO1 pitch
+
+// Poly mod scaling. Full ADC swing (+/-2048 from centre) = +/-2 octaves on VCO1.
+// (24 semitones x NOTE_SF) / 2048. Raise for wider sync sweeps, lower for subtler.
+#define POLYMOD_SCALE    ((24.0f * NOTE_SF) / 2048.0f)
+#define POLYMOD_DEADBAND 6   // ADC counts either side of centre treated as 0 (noise)
 
 // LFO rate / clock outputs (reuse the freed FM/PWM ADC pins, already broken out).
 // 50% square at the LFO rate - drive a rate-indicator LED (via series resistor).
