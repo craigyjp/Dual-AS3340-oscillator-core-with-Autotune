@@ -94,6 +94,7 @@
 
 #define CC_LFO1_AMP_DEPTH     111  // LFO1 -> Amp CV depth    (channel_h, bipolar)
 
+#define CC_POLYMOD_SW         112  // Poly mod on VCO1: >=64 on, <64 off (VCO1 ignores pin 28 when off)
 
 // ------------------------------------------------------------------ //
 
